@@ -1,8 +1,8 @@
 import React, { useState } from 'react';
-import { CheckCircle2, Globe2 } from 'lucide-react';
+import { CheckCircle2, Globe2, ArrowLeft } from 'lucide-react';
 import { useLanguage } from '../context/LanguageContext';
 
-export default function LanguageSelectionScreen({ onLanguageSelect }) {
+export default function LanguageSelectionScreen({ onLanguageSelect, onBack }) {
   const { language, setLanguage, languages, t } = useLanguage();
   const [selected, setSelected] = useState(language || 'en');
 
@@ -22,8 +22,21 @@ export default function LanguageSelectionScreen({ onLanguageSelect }) {
       {/* Light Overlay to ensure text readability */}
       <div className="absolute inset-0 bg-white/10 z-10 backdrop-blur-[2px]" />
 
-      <div className="w-full max-w-md px-5 pt-8 z-20 flex flex-col h-[100dvh] justify-between">
-        
+      <div className="w-full max-w-md px-5 pt-8 z-20 flex flex-col h-[100dvh] justify-between relative">
+        {/* Back Button */}
+        {onBack && (
+          <div className="absolute top-4 left-5 z-30">
+            <button
+              type="button"
+              onClick={onBack}
+              className="px-3 py-1.5 rounded-xl bg-white/70 hover:bg-white text-gray-800 border border-white/60 text-xs font-bold backdrop-blur-md transition-all flex items-center gap-1.5 shadow-sm hover:scale-105 active:scale-95"
+            >
+              <ArrowLeft className="w-4 h-4 text-blue-600" />
+              <span>{t('backBtn', 'Back')}</span>
+            </button>
+          </div>
+        )}
+
         {/* Header */}
         <div className="mt-8 mb-8 sm:mt-2 text-center drop-shadow-[0_0_10px_rgba(255,255,255,0.9)]">
           <h1 className="text-3xl font-bold text-gray-900 tracking-tight">

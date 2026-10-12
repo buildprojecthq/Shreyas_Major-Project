@@ -60,10 +60,13 @@ float currentDbQuantity = 0.0;
 String inventoryRowId = "";
 
 // Forward Declarations
-void executePhysicalDispense(const char* label);
+void executePhysicalDispense(const char* label, float targetGrams = 100.0);
 void verifyAndDispense();
 void showIdleScreen();
 void showError(String message);
+
+// Cooldown tracker to prevent duplicate dispensing triggers
+unsigned long lastDispenseTimestamp = 0;
 
 // ---------- WebServer Handlers ----------
 void handleWebDispense() {
@@ -71,10 +74,21 @@ void handleWebDispense() {
   server.sendHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
   server.sendHeader("Access-Control-Allow-Headers", "*");
   server.sendHeader("Access-Control-Allow-Private-Network", "true");
-  server.send(200, "application/json", "{\"status\":\"dispensing_started\",\"target_grams\":100}");
+
+  float targetGrams = 100.0;
+  if (server.hasArg("weight")) {
+    targetGrams = server.arg("weight").toFloat();
+  }
+  if (targetGrams < 50.0) targetGrams = 100.0;
+  if (targetGrams > 500.0) targetGrams = 500.0; // Safety cap against container overflow
+
+  String res = "{\"status\":\"dispensing_started\",\"target_grams\":" + String((int)targetGrams) + "}";
+  server.send(200, "application/json", res);
   
-  Serial.println("\n[WEB TRIGGER] Face ID Dispense signal received! Opening valve...");
-  executePhysicalDispense("Face Auth OK");
+  Serial.print("\n[WEB TRIGGER] Dynamic Dispense signal received for: ");
+  Serial.print((int)targetGrams);
+  Serial.println("g! Opening valve...");
+  executePhysicalDispense("Web Auth OK", targetGrams);
 }
 
 void handleTestServo() {
@@ -277,13 +291,31 @@ void checkCloudDispenseQueue() {
       String bookingId = booking["id"].as<String>();
       String rationId = booking["ration_id"].as<String>();
       
+      // Parse target weight from booking items_claimed or target_grams
+      float cloudTargetGrams = 100.0;
+      if (booking.containsKey("target_grams")) {
+        cloudTargetGrams = booking["target_grams"].as<float>();
+      } else if (booking.containsKey("items_claimed")) {
+        if (booking["items_claimed"].is<JsonArray>() && booking["items_claimed"].size() > 0) {
+          float qtyKg = booking["items_claimed"][0]["quantity"].as<float>();
+          if (qtyKg > 0.0) {
+            cloudTargetGrams = qtyKg * 1000.0;
+          }
+        }
+      }
+      if (cloudTargetGrams < 50.0) cloudTargetGrams = 100.0;
+      if (cloudTargetGrams > 500.0) cloudTargetGrams = 500.0; // Safety cap
+
       Serial.println("\n==========================================");
       Serial.print("⚡ [CLOUD TRIGGER] Face ID Dispense Signal for: ");
-      Serial.println(rationId);
+      Serial.print(rationId);
+      Serial.print(" (Target: ");
+      Serial.print((int)cloudTargetGrams);
+      Serial.println("g)");
       Serial.println("==========================================");
 
-      // 1. Execute physical valve opening & dispensing
-      executePhysicalDispense("Face Auth OK");
+      // 1. Execute physical valve opening & dispensing with dynamic quota
+      executePhysicalDispense("Face Auth OK", cloudTargetGrams);
 
       // 2. Mark this booking as 'claimed'
       HTTPClient patchHttp;
@@ -303,8 +335,8 @@ void checkCloudDispenseQueue() {
       patchHttp.PATCH(patchBody);
       patchHttp.end();
 
-      // 3. Deduct from inventory
-      deductInventory(0.1);
+      // 3. Deduct dynamic quantity from inventory in kg
+      deductInventory(cloudTargetGrams / 1000.0);
     }
   }
   http.end();
@@ -449,13 +481,13 @@ void verifyAndDispense() {
     return;
   }
 
-  // 4. Dispense Hardware Logic with Stabilized Weight Range
-  executePhysicalDispense("RFID Auth OK");
+  // 4. Dispense Hardware Logic with Stabilized Weight Range (Fixed 100g for physical RFID)
+  executePhysicalDispense("RFID Auth OK", 100.0);
 
   lcd.clear();
   lcd.print("Updating DB...");
 
-  // 5. Update Database via HTTP PATCH
+  // 5. Update Database via HTTP PATCH (Fixed 0.1kg for RFID)
   float newDbQuantity = currentDbQuantity - 0.1;
   updateDatabase(newDbQuantity);
 
@@ -463,10 +495,20 @@ void verifyAndDispense() {
 }
 
 // ---------- Physical Hardware Dispensing Engine ----------
-void executePhysicalDispense(const char* label) {
+void executePhysicalDispense(const char* label, float targetGrams) {
+  // Prevent duplicate execution within 4 seconds cooldown
+  if (millis() - lastDispenseTimestamp < 4000 && lastDispenseTimestamp != 0) {
+    Serial.println("[WARNING] Dispense request ignored - Cooldown active!");
+    return;
+  }
+  lastDispenseTimestamp = millis();
+
+  int targetInt = (int)targetGrams;
   Serial.print("\n=== OPENING VALVE (90°) -> [");
   Serial.print(label);
-  Serial.println("] ===");
+  Serial.print("] (Target: ");
+  Serial.print(targetInt);
+  Serial.println("g) ===");
 
   lcd.clear();
   lcd.setCursor(0, 0);
@@ -488,8 +530,12 @@ void executePhysicalDispense(const char* label) {
   delay(200);
 
   bool targetReached = false;
-  // Trigger close at 86.0g to account for servo transit time and in-flight grains
-  float cutoffWeight = 86.0; 
+  // Trigger close in advance to account for servo transit time and in-flight grains
+  float cutoffWeight = targetGrams - 14.0; 
+  if (cutoffWeight < 10.0) cutoffWeight = targetGrams * 0.85;
+
+  // Dynamic Safety watchdog timeout: 12 seconds base + 50ms per gram (e.g. 100g -> 17s, 300g -> 27s, 500g -> 37s)
+  unsigned long maxDurationMs = 12000 + (unsigned long)(targetGrams * 50);
   unsigned long startTime = millis();
 
   while (!targetReached) {
@@ -510,29 +556,35 @@ void executePhysicalDispense(const char* label) {
       
       Serial.print("Live: ");
       Serial.print((int)smoothedWeight);
-      Serial.println(" g / 100g");
+      Serial.print(" g / ");
+      Serial.print(targetInt);
+      Serial.println(" g");
 
-      // Dynamic counter clamped to 100g max on live display
+      // Dynamic counter clamped to target max on live display
       int liveDisplay = (int)smoothedWeight;
-      if (liveDisplay > 100) liveDisplay = 100;
+      if (liveDisplay > targetInt) liveDisplay = targetInt;
 
       lcd.setCursor(0, 1);
       lcd.print("Wt: ");
       lcd.print(liveDisplay);
-      lcd.print("g / 100g    ");
+      lcd.print("g / ");
+      lcd.print(targetInt);
+      lcd.print("g    ");
 
-      // Check 1: Target reached threshold (>= 86g)
+      // Check 1: Target reached threshold
       if (smoothedWeight >= cutoffWeight) {
         dispenser.write(0); // Close gate immediately
-        Serial.println("Target 100g Triggered ✅ - Gate Closed to 0°");
+        Serial.print("Target ");
+        Serial.print(targetInt);
+        Serial.println("g Triggered ✅ - Gate Closed to 0°");
         targetReached = true;
       }
     }
 
-    // Check 2: Safety watchdog timeout (15s)
-    if (millis() - startTime > 15000) {
+    // Check 2: Dynamic safety watchdog timeout
+    if (millis() - startTime > maxDurationMs) {
       dispenser.write(0); // Emergency/Safety close gate
-      Serial.println("⚠️ Safety Timeout (15s) Triggered! Gate Closed to 0°");
+      Serial.println("⚠️ Safety Timeout Triggered! Gate Closed to 0°");
       targetReached = true;
     }
     delay(20); // Fast 20ms refresh cycle
@@ -546,12 +598,16 @@ void executePhysicalDispense(const char* label) {
   lcd.clear();
   lcd.setCursor(0, 0);
 
-  // 100g Clamping Mechanism: If target reached (>= 85g), clamp output to clean 100g
-  if (finalWeight >= 85.0) {
+  // Dynamic Clamping Mechanism: If target reached (>= target - 15g), clamp output to clean targetInt
+  if (finalWeight >= (targetGrams - 15.0)) {
     lcd.print("Dispense Done!");
     lcd.setCursor(0, 1);
-    lcd.print("Net: 100 g");
-    Serial.println("Final Result: 100g Dispensed (Target Quota Met) ✅");
+    lcd.print("Net: ");
+    lcd.print(targetInt);
+    lcd.print(" g");
+    Serial.print("Final Result: ");
+    Serial.print(targetInt);
+    Serial.println("g Dispensed (Target Quota Met) ✅");
   } else {
     lcd.print("Timeout/LowGrain");
     lcd.setCursor(0, 1);

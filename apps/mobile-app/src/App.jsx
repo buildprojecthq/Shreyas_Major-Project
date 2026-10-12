@@ -85,13 +85,17 @@ function MainApp() {
             setLanguage(lang);
             setLanguageSelected(true);
           }}
+          onBack={Boolean(localStorage.getItem('smart_ration_language')) ? () => setLanguageSelected(true) : undefined}
         />
       );
     }
     return (
       <>
         <NotificationToast />
-        <RegistrationForm onUserLogin={(user) => setCurrentUser(user)} />
+        <RegistrationForm
+          onUserLogin={(user) => setCurrentUser(user)}
+          onOpenLanguageSelect={() => setLanguageSelected(false)}
+        />
       </>
     );
   }

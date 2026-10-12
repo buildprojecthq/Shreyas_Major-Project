@@ -194,15 +194,19 @@ export default function FaceLookupModal({ isOpen, onClose, onUserFound }) {
           return;
         }
 
+        const members = bestMatch.family_members || 1;
+        const targetGrams = members * 100;
+        const targetKg = targetGrams / 1000;
+
         // Quota is available -> Execute Auto-Dispense if toggled on
         if (autoDispense) {
-          setStatus(`✅ Verified: ${bestMatch.name} | Auto-Dispensing 100g Rice on ESP32...`);
+          setStatus(`✅ Verified: ${bestMatch.name} | Auto-Dispensing ${targetGrams}g Rice on ESP32 (${members} Members)...`);
 
-          // 1. Dispatch trigger to ESP32 local hardware
+          // 1. Dispatch trigger to ESP32 local hardware with dynamic weight
           const esp32Ip = localStorage.getItem('esp32_ip') || '';
           if (esp32Ip.trim()) {
             const cleanIp = esp32Ip.trim().replace(/^https?:\/\//, '').replace(/\/+$/, '');
-            fetch(`http://${cleanIp}/dispense`, { method: 'GET', mode: 'no-cors' }).catch(e => console.warn(e));
+            fetch(`http://${cleanIp}/dispense?weight=${targetGrams}`, { method: 'GET', mode: 'no-cors' }).catch(e => console.warn(e));
           }
 
           // 2. Insert cloud trigger into bookings table (detected by ESP32 in real time)
@@ -210,7 +214,7 @@ export default function FaceLookupModal({ isOpen, onClose, onUserFound }) {
             ration_id: bestMatch.ration_id,
             slot_time: new Date().toISOString(),
             status: 'PENDING_DISPENSE',
-            items_claimed: [{ item_name: 'Subsidized Rice', quantity: 0.1, unit: 'kg' }],
+            items_claimed: [{ item_name: 'Subsidized Rice', quantity: targetKg, unit: 'kg' }],
             claimed_at: new Date().toISOString()
           }]);
 

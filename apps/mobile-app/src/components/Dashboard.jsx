@@ -3,7 +3,7 @@ import { supabase } from '../lib/supabaseClient';
 import { notificationService } from '../lib/notificationService';
 import {
   ShieldCheck, AlertTriangle, Fingerprint, ScanFace,
-  RefreshCw, Clock, PackageCheck, ExternalLink, Activity, Info, Bell, Sparkles, Send
+  RefreshCw, Clock, PackageCheck, ExternalLink, Activity, Info, Bell, Sparkles, Send, Users
 } from 'lucide-react';
 import { useLanguage } from '../context/LanguageContext';
 
@@ -206,10 +206,15 @@ export default function Dashboard({ user, onUserUpdated, onNavigateToBookings })
             <h2 className="text-2xl sm:text-3xl font-extrabold text-gray-900 tracking-tight">
               {currentUser?.name || 'Beneficiary Card'}
             </h2>
-            <div className="flex flex-wrap items-center gap-4 mt-2 text-sm text-gray-500 font-mono">
+            <div className="flex flex-wrap items-center gap-3 mt-2 text-sm text-gray-500 font-mono">
               <span>ID: <strong className="text-gray-900">{currentUser?.ration_id}</strong></span>
               <span>•</span>
               <span>Tel: <strong className="text-gray-900">{currentUser?.phone}</strong></span>
+              <span>•</span>
+              <span className="inline-flex items-center gap-1.5 text-blue-800 bg-blue-50 px-2 py-0.5 rounded border border-blue-200 text-xs font-semibold">
+                <Users className="w-3.5 h-3.5 text-blue-600" />
+                <span>{currentUser?.family_members || 1} Members ({(currentUser?.family_members || 1) * 100}g Quota)</span>
+              </span>
             </div>
           </div>
 

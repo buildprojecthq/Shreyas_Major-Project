@@ -1,15 +1,16 @@
 import React, { useState } from 'react';
 import { supabase } from '../lib/supabaseClient';
 import FaceLoginModal from './FaceLoginModal';
-import { UserPlus, LogIn, ShieldCheck, AlertCircle, Loader2, Sparkles, Scan } from 'lucide-react';
+import { UserPlus, LogIn, ShieldCheck, AlertCircle, Loader2, Sparkles, Scan, Users, Globe } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useLanguage } from '../context/LanguageContext';
 
-export default function RegistrationForm({ onUserLogin }) {
-  const { t } = useLanguage();
+export default function RegistrationForm({ onUserLogin, onOpenLanguageSelect }) {
+  const { t, language, languages } = useLanguage();
   const [isRegistering, setIsRegistering] = useState(true);
   const [name, setName] = useState('');
   const [phone, setPhone] = useState('');
+  const [familyMembers, setFamilyMembers] = useState(1);
   const [rationId, setRationId] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
@@ -132,6 +133,7 @@ export default function RegistrationForm({ onUserLogin }) {
           ration_id: rationId.trim(),
           name: name.trim(),
           phone: phone.trim(),
+          family_members: parseInt(familyMembers, 10) || 1,
           face_encoding: null,
           fingerprint_id: null,
           is_enrolling: false
@@ -145,6 +147,7 @@ export default function RegistrationForm({ onUserLogin }) {
             ration_id: rationId.trim(),
             name: name.trim(),
             phone: phone.trim(),
+            family_members: parseInt(familyMembers, 10) || 1,
             face_encoding: null,
             fingerprint_id: null,
             is_enrolling: false,
@@ -198,6 +201,19 @@ export default function RegistrationForm({ onUserLogin }) {
 
       {/* Light Overlay */}
       <div className="absolute inset-0 bg-white/30 z-10 backdrop-blur-sm" />
+
+      {/* Top-Right Language Switcher Button */}
+      {onOpenLanguageSelect && (
+        <button
+          type="button"
+          onClick={onOpenLanguageSelect}
+          className="absolute top-4 right-4 sm:top-6 sm:right-6 z-30 px-3.5 py-2 rounded-2xl bg-white/70 hover:bg-white text-gray-800 hover:text-blue-700 border border-white/60 shadow-lg backdrop-blur-md transition-all flex items-center gap-2 text-xs font-bold hover:scale-105 active:scale-95 group"
+          title={t('changeLanguage', 'Change Language')}
+        >
+          <Globe className="w-4 h-4 text-blue-600 transition-transform group-hover:rotate-12" />
+          <span>{languages.find(l => l.id === language)?.native || 'English'}</span>
+        </button>
+      )}
 
       {/* Mock SMS Toast */}
       <AnimatePresence>
@@ -333,6 +349,34 @@ export default function RegistrationForm({ onUserLogin }) {
                         className="w-full px-3 py-3 bg-transparent text-gray-900 placeholder-gray-500 font-mono outline-none"
                       />
                     </div>
+                  </div>
+
+                  <div>
+                    <div className="flex items-center justify-between mb-2">
+                      <label className="block text-xs font-semibold uppercase tracking-wider text-gray-700">
+                        Family Members
+                      </label>
+                    </div>
+                    <div className="flex items-center rounded-xl bg-white/60 border border-white/60 focus-within:bg-white focus-within:border-blue-600 focus-within:ring-2 focus-within:ring-blue-600/20 transition-all backdrop-blur-sm overflow-hidden">
+                      <div className="pl-4 pr-3 py-3 text-gray-600 flex items-center border-r border-gray-300">
+                        <Users className="w-5 h-5 text-blue-600" />
+                      </div>
+                      <input
+                        type="number"
+                        required
+                        min={1}
+                        max={10}
+                        value={familyMembers}
+                        onChange={(e) => {
+                          const val = Math.max(1, Math.min(10, parseInt(e.target.value, 10) || 1));
+                          setFamilyMembers(val);
+                        }}
+                        className="w-full px-3 py-3 bg-transparent text-gray-900 font-mono outline-none"
+                      />
+                    </div>
+                    <p className="text-[11px] text-gray-500 mt-1">
+                      Dynamic PDS allotment: 100g subsidized rice allocated per household member.
+                    </p>
                   </div>
                 </>
               )}
