@@ -247,6 +247,7 @@ export default function BeneficiaryCard({ user: initialUser, onResetSearch }) {
           ration_id: user.ration_id,
           slot_time: new Date().toISOString(),
           status: 'PENDING_DISPENSE',
+          target_grams: targetGrams,
           items_claimed: [
             { item_name: 'Subsidized Rice', quantity: targetKg, unit: 'kg' }
           ],

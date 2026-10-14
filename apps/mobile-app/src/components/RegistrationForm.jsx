@@ -127,13 +127,14 @@ export default function RegistrationForm({ onUserLogin, onOpenLanguageSelect }) 
     setLoading(true);
     setError(null);
     try {
+      const membersCount = Math.max(1, Math.min(10, parseInt(familyMembers, 10) || 1));
       const { data: newUser, error: insertError } = await supabase
         .from('users')
         .insert([{
           ration_id: rationId.trim(),
           name: name.trim(),
           phone: phone.trim(),
-          family_members: parseInt(familyMembers, 10) || 1,
+          family_members: membersCount,
           face_encoding: null,
           fingerprint_id: null,
           is_enrolling: false
@@ -142,21 +143,8 @@ export default function RegistrationForm({ onUserLogin, onOpenLanguageSelect }) 
         .single();
 
       if (insertError) {
-        if (insertError.message.includes('fetch') || insertError.message.includes('connection') || insertError.code === 'PGRST301') {
-          const demoUser = {
-            ration_id: rationId.trim(),
-            name: name.trim(),
-            phone: phone.trim(),
-            family_members: parseInt(familyMembers, 10) || 1,
-            face_encoding: null,
-            fingerprint_id: null,
-            is_enrolling: false,
-            is_demo: true
-          };
-          onUserLogin(demoUser);
-          return;
-        }
-        throw insertError;
+        console.error("Database registration error:", insertError);
+        throw new Error(insertError.message || insertError.details || 'Database rejected registration. Check your Supabase configuration.');
       }
       onUserLogin(newUser);
     } catch (err) {
@@ -366,10 +354,25 @@ export default function RegistrationForm({ onUserLogin, onOpenLanguageSelect }) 
                         required
                         min={1}
                         max={10}
+                        placeholder="1"
                         value={familyMembers}
                         onChange={(e) => {
-                          const val = Math.max(1, Math.min(10, parseInt(e.target.value, 10) || 1));
-                          setFamilyMembers(val);
+                          const val = e.target.value;
+                          if (val === '') {
+                            setFamilyMembers('');
+                            return;
+                          }
+                          const parsed = parseInt(val, 10);
+                          if (!isNaN(parsed)) {
+                            setFamilyMembers(parsed);
+                          }
+                        }}
+                        onBlur={() => {
+                          if (!familyMembers || parseInt(familyMembers, 10) < 1) {
+                            setFamilyMembers(1);
+                          } else if (parseInt(familyMembers, 10) > 10) {
+                            setFamilyMembers(10);
+                          }
                         }}
                         className="w-full px-3 py-3 bg-transparent text-gray-900 font-mono outline-none"
                       />

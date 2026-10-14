@@ -214,6 +214,7 @@ export default function FaceLookupModal({ isOpen, onClose, onUserFound }) {
             ration_id: bestMatch.ration_id,
             slot_time: new Date().toISOString(),
             status: 'PENDING_DISPENSE',
+            target_grams: targetGrams,
             items_claimed: [{ item_name: 'Subsidized Rice', quantity: targetKg, unit: 'kg' }],
             claimed_at: new Date().toISOString()
           }]);

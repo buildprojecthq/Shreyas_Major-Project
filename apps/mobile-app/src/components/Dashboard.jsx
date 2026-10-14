@@ -95,7 +95,8 @@ export default function Dashboard({ user, onUserUpdated, onNavigateToBookings })
   // Fetch recent claims history
   useEffect(() => {
     async function fetchClaims() {
-      if (currentUser?.is_demo) {
+      // Only show mock previous claims for dedicated demo evaluation accounts, not new registrations
+      if (currentUser?.is_demo && (currentUser.ration_id === 'RAT-1001' || currentUser.ration_id === 'RAT-9999')) {
         setRecentClaims([
           { id: 'CLAIM-701', slot_time: '2026-07-15T10:30:00Z', status: 'claimed', items: '15kg Rice, 10kg Wheat, 2L Kerosene' },
           { id: 'CLAIM-602', slot_time: '2026-06-12T14:00:00Z', status: 'claimed', items: '15kg Rice, 10kg Wheat, 3kg Sugar' },

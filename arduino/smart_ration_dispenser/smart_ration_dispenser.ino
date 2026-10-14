@@ -291,14 +291,46 @@ void checkCloudDispenseQueue() {
       String bookingId = booking["id"].as<String>();
       String rationId = booking["ration_id"].as<String>();
       
-      // Parse target weight from booking items_claimed or target_grams
-      float cloudTargetGrams = 100.0;
+      // 1. Fetch dynamic family quota directly from Supabase users table
+      int familyMembers = 1;
+      String userName = "Beneficiary";
+      HTTPClient userHttp;
+      String userUrl = "https://svuzznupaozcjvtederc.supabase.co/rest/v1/users?ration_id=eq." + rationId + "&select=name,family_members";
+      userHttp.begin(client, userUrl);
+      userHttp.setTimeout(3000);
+      userHttp.addHeader("apikey", SUPABASE_ANON_KEY);
+      userHttp.addHeader("Authorization", String("Bearer ") + SUPABASE_ANON_KEY);
+      userHttp.addHeader("Content-Type", "application/json");
+
+      int userCode = userHttp.GET();
+      if (userCode == 200) {
+        String userPayload = userHttp.getString();
+        DynamicJsonDocument userDoc(512);
+        if (!deserializeJson(userDoc, userPayload) && userDoc.size() > 0) {
+          if (userDoc[0].containsKey("family_members")) {
+            familyMembers = userDoc[0]["family_members"].as<int>();
+            if (familyMembers < 1) familyMembers = 1;
+          }
+          if (userDoc[0].containsKey("name")) {
+            userName = userDoc[0]["name"].as<String>();
+          }
+        }
+      }
+      userHttp.end();
+
+      // Dynamic quota: 100g per registered family member (e.g. 3 members = 300g)
+      float cloudTargetGrams = familyMembers * 100.0;
+
+      // Allow higher target weight if explicitly provided in booking
       if (booking.containsKey("target_grams")) {
-        cloudTargetGrams = booking["target_grams"].as<float>();
+        float bGrams = booking["target_grams"].as<float>();
+        if (bGrams > cloudTargetGrams) {
+          cloudTargetGrams = bGrams;
+        }
       } else if (booking.containsKey("items_claimed")) {
         if (booking["items_claimed"].is<JsonArray>() && booking["items_claimed"].size() > 0) {
           float qtyKg = booking["items_claimed"][0]["quantity"].as<float>();
-          if (qtyKg > 0.0) {
+          if ((qtyKg * 1000.0) > cloudTargetGrams) {
             cloudTargetGrams = qtyKg * 1000.0;
           }
         }
@@ -307,11 +339,15 @@ void checkCloudDispenseQueue() {
       if (cloudTargetGrams > 500.0) cloudTargetGrams = 500.0; // Safety cap
 
       Serial.println("\n==========================================");
-      Serial.print("⚡ [CLOUD TRIGGER] Face ID Dispense Signal for: ");
+      Serial.print("⚡ [CLOUD TRIGGER] Dispense Signal for: ");
+      Serial.print(userName);
+      Serial.print(" (");
       Serial.print(rationId);
-      Serial.print(" (Target: ");
+      Serial.print(") | Family Members: ");
+      Serial.print(familyMembers);
+      Serial.print(" | Dynamic Target: ");
       Serial.print((int)cloudTargetGrams);
-      Serial.println("g)");
+      Serial.println("g");
       Serial.println("==========================================");
 
       // 1. Execute physical valve opening & dispensing with dynamic quota
@@ -327,8 +363,9 @@ void checkCloudDispenseQueue() {
       patchHttp.addHeader("Content-Type", "application/json");
       patchHttp.addHeader("Prefer", "return=minimal");
 
-      DynamicJsonDocument patchDoc(128);
+      DynamicJsonDocument patchDoc(256);
       patchDoc["status"] = "claimed";
+      patchDoc["target_grams"] = cloudTargetGrams;
       String patchBody;
       serializeJson(patchDoc, patchBody);
 
@@ -481,14 +518,54 @@ void verifyAndDispense() {
     return;
   }
 
-  // 4. Dispense Hardware Logic with Stabilized Weight Range (Fixed 100g for physical RFID)
-  executePhysicalDispense("RFID Auth OK", 100.0);
+  // 3b. Fetch dynamic family quota for RFID cardholder
+  int rfidMembers = 1;
+  String rfidUserName = "Beneficiary";
+  HTTPClient rfidUserHttp;
+  String rfidUserUrl = "https://svuzznupaozcjvtederc.supabase.co/rest/v1/users?order=created_at.desc&limit=1&select=name,family_members";
+  rfidUserHttp.begin(client, rfidUserUrl);
+  rfidUserHttp.setTimeout(3000);
+  rfidUserHttp.addHeader("apikey", SUPABASE_ANON_KEY);
+  rfidUserHttp.addHeader("Authorization", String("Bearer ") + SUPABASE_ANON_KEY);
+  rfidUserHttp.addHeader("Content-Type", "application/json");
+
+  int rCode = rfidUserHttp.GET();
+  if (rCode == 200) {
+    String rPayload = rfidUserHttp.getString();
+    DynamicJsonDocument rDoc(512);
+    if (!deserializeJson(rDoc, rPayload) && rDoc.size() > 0) {
+      if (rDoc[0].containsKey("family_members")) {
+        rfidMembers = rDoc[0]["family_members"].as<int>();
+        if (rfidMembers < 1) rfidMembers = 1;
+      }
+      if (rDoc[0].containsKey("name")) {
+        rfidUserName = rDoc[0]["name"].as<String>();
+      }
+    }
+  }
+  rfidUserHttp.end();
+
+  float rfidTargetGrams = rfidMembers * 100.0;
+  if (rfidTargetGrams < 50.0) rfidTargetGrams = 100.0;
+  if (rfidTargetGrams > 500.0) rfidTargetGrams = 500.0;
+
+  Serial.print("\n[RFID AUTH] Beneficiary: ");
+  Serial.print(rfidUserName);
+  Serial.print(" | Members: ");
+  Serial.print(rfidMembers);
+  Serial.print(" -> Target Quota: ");
+  Serial.print((int)rfidTargetGrams);
+  Serial.println("g");
+
+  // 4. Dispense Hardware Logic with Stabilized Weight Range (Dynamic Quota based on family members!)
+  executePhysicalDispense("RFID Auth OK", rfidTargetGrams);
 
   lcd.clear();
   lcd.print("Updating DB...");
 
-  // 5. Update Database via HTTP PATCH (Fixed 0.1kg for RFID)
-  float newDbQuantity = currentDbQuantity - 0.1;
+  // 5. Update Database via HTTP PATCH (Deduct dynamic quantity in kg)
+  float deductedKg = rfidTargetGrams / 1000.0;
+  float newDbQuantity = currentDbQuantity - deductedKg;
   updateDatabase(newDbQuantity);
 
   showIdleScreen();
@@ -504,11 +581,26 @@ void executePhysicalDispense(const char* label, float targetGrams) {
   lastDispenseTimestamp = millis();
 
   int targetInt = (int)targetGrams;
+  int memCount = targetInt / 100;
+  if (memCount < 1) memCount = 1;
+
   Serial.print("\n=== OPENING VALVE (90°) -> [");
   Serial.print(label);
   Serial.print("] (Target: ");
   Serial.print(targetInt);
   Serial.println("g) ===");
+
+  // Announce dynamic quota clearly on LCD
+  lcd.clear();
+  lcd.setCursor(0, 0);
+  lcd.print(label);
+  lcd.setCursor(0, 1);
+  lcd.print("Target: ");
+  lcd.print(targetInt);
+  lcd.print("g (");
+  lcd.print(memCount);
+  lcd.print("M)");
+  delay(1200);
 
   lcd.clear();
   lcd.setCursor(0, 0);
