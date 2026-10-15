@@ -80,7 +80,7 @@ void handleWebDispense() {
     targetGrams = server.arg("weight").toFloat();
   }
   if (targetGrams < 50.0) targetGrams = 100.0;
-  if (targetGrams > 500.0) targetGrams = 500.0; // Safety cap against container overflow
+  if (targetGrams > 1000.0) targetGrams = 1000.0; // Dynamic quota cap (up to 10 family members = 1kg)
 
   String res = "{\"status\":\"dispensing_started\",\"target_grams\":" + String((int)targetGrams) + "}";
   server.send(200, "application/json", res);
@@ -336,7 +336,7 @@ void checkCloudDispenseQueue() {
         }
       }
       if (cloudTargetGrams < 50.0) cloudTargetGrams = 100.0;
-      if (cloudTargetGrams > 500.0) cloudTargetGrams = 500.0; // Safety cap
+      if (cloudTargetGrams > 1000.0) cloudTargetGrams = 1000.0; // Dynamic quota cap (up to 10 family members = 1kg)
 
       Serial.println("\n==========================================");
       Serial.print("⚡ [CLOUD TRIGGER] Dispense Signal for: ");
@@ -363,9 +363,17 @@ void checkCloudDispenseQueue() {
       patchHttp.addHeader("Content-Type", "application/json");
       patchHttp.addHeader("Prefer", "return=minimal");
 
-      DynamicJsonDocument patchDoc(256);
+      DynamicJsonDocument patchDoc(512);
       patchDoc["status"] = "claimed";
       patchDoc["target_grams"] = cloudTargetGrams;
+      
+      float dispensedKg = cloudTargetGrams / 1000.0;
+      JsonArray itemsArr = patchDoc.createNestedArray("items_claimed");
+      JsonObject itemObj = itemsArr.createNestedObject();
+      itemObj["item_name"] = "Subsidized Rice";
+      itemObj["quantity"] = dispensedKg;
+      itemObj["unit"] = "kg";
+
       String patchBody;
       serializeJson(patchDoc, patchBody);
 
@@ -518,54 +526,18 @@ void verifyAndDispense() {
     return;
   }
 
-  // 3b. Fetch dynamic family quota for RFID cardholder
-  int rfidMembers = 1;
-  String rfidUserName = "Beneficiary";
-  HTTPClient rfidUserHttp;
-  String rfidUserUrl = "https://svuzznupaozcjvtederc.supabase.co/rest/v1/users?order=created_at.desc&limit=1&select=name,family_members";
-  rfidUserHttp.begin(client, rfidUserUrl);
-  rfidUserHttp.setTimeout(3000);
-  rfidUserHttp.addHeader("apikey", SUPABASE_ANON_KEY);
-  rfidUserHttp.addHeader("Authorization", String("Bearer ") + SUPABASE_ANON_KEY);
-  rfidUserHttp.addHeader("Content-Type", "application/json");
+  // 4. Standard Fixed Quota for Physical RFID Card (100g)
+  float rfidTargetGrams = 100.0;
+  Serial.println("\n[RFID AUTH] Authorized RFID Card Scanned -> Dispensing Fixed Quota: 100g");
 
-  int rCode = rfidUserHttp.GET();
-  if (rCode == 200) {
-    String rPayload = rfidUserHttp.getString();
-    DynamicJsonDocument rDoc(512);
-    if (!deserializeJson(rDoc, rPayload) && rDoc.size() > 0) {
-      if (rDoc[0].containsKey("family_members")) {
-        rfidMembers = rDoc[0]["family_members"].as<int>();
-        if (rfidMembers < 1) rfidMembers = 1;
-      }
-      if (rDoc[0].containsKey("name")) {
-        rfidUserName = rDoc[0]["name"].as<String>();
-      }
-    }
-  }
-  rfidUserHttp.end();
-
-  float rfidTargetGrams = rfidMembers * 100.0;
-  if (rfidTargetGrams < 50.0) rfidTargetGrams = 100.0;
-  if (rfidTargetGrams > 500.0) rfidTargetGrams = 500.0;
-
-  Serial.print("\n[RFID AUTH] Beneficiary: ");
-  Serial.print(rfidUserName);
-  Serial.print(" | Members: ");
-  Serial.print(rfidMembers);
-  Serial.print(" -> Target Quota: ");
-  Serial.print((int)rfidTargetGrams);
-  Serial.println("g");
-
-  // 4. Dispense Hardware Logic with Stabilized Weight Range (Dynamic Quota based on family members!)
+  // Dispense Hardware Logic (Fixed 100g for RFID token)
   executePhysicalDispense("RFID Auth OK", rfidTargetGrams);
 
   lcd.clear();
   lcd.print("Updating DB...");
 
-  // 5. Update Database via HTTP PATCH (Deduct dynamic quantity in kg)
-  float deductedKg = rfidTargetGrams / 1000.0;
-  float newDbQuantity = currentDbQuantity - deductedKg;
+  // 5. Update Database via HTTP PATCH (Deduct 0.1kg for RFID)
+  float newDbQuantity = currentDbQuantity - 0.1;
   updateDatabase(newDbQuantity);
 
   showIdleScreen();
@@ -597,9 +569,13 @@ void executePhysicalDispense(const char* label, float targetGrams) {
   lcd.setCursor(0, 1);
   lcd.print("Target: ");
   lcd.print(targetInt);
-  lcd.print("g (");
-  lcd.print(memCount);
-  lcd.print("M)");
+  if (strstr(label, "RFID") != NULL) {
+    lcd.print("g (Card)");
+  } else {
+    lcd.print("g (");
+    lcd.print(memCount);
+    lcd.print("M)");
+  }
   delay(1200);
 
   lcd.clear();

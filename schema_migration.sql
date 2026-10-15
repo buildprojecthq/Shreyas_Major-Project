@@ -100,3 +100,16 @@ CREATE TRIGGER trigger_compute_dynamic_booking_target
 BEFORE INSERT ON public.bookings
 FOR EACH ROW
 EXECUTE FUNCTION public.compute_dynamic_booking_target();
+
+-- 6. Enable Realtime Replication for instant push to citizen mobile app
+DO $$
+BEGIN
+  BEGIN
+    ALTER PUBLICATION supabase_realtime ADD TABLE public.bookings;
+  EXCEPTION WHEN OTHERS THEN NULL;
+  END;
+  BEGIN
+    ALTER PUBLICATION supabase_realtime ADD TABLE public.users;
+  EXCEPTION WHEN OTHERS THEN NULL;
+  END;
+END $$;

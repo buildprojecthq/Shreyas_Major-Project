@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { supabase } from '../lib/supabaseClient';
 import { notificationService } from '../lib/notificationService';
 import {
@@ -43,12 +43,52 @@ export default function Dashboard({ user, onUserUpdated, onNavigateToBookings })
     }
   }, []);
 
-  // Realtime subscription to live changes on this user row from the Kiosk / ESP32 Hardware
-  useEffect(() => {
-    if (!currentUser || currentUser.is_demo) return;
+  // Fetch recent claims history
+  const fetchClaims = useCallback(async (showNotice = false) => {
+    if (!currentUser?.ration_id) return;
 
-    const subscription = supabase
-      .channel(`user-updates-${currentUser.ration_id}`)
+    // Only show mock previous claims for dedicated demo evaluation accounts, not real registrations
+    if (currentUser?.is_demo && (currentUser.ration_id === 'RAT-1001' || currentUser.ration_id === 'RAT-9999')) {
+      setRecentClaims([
+        { id: 'CLAIM-701', slot_time: '2026-07-15T10:30:00Z', status: 'claimed', items: '15kg Rice, 10kg Wheat, 2L Kerosene' },
+        { id: 'CLAIM-602', slot_time: '2026-06-12T14:00:00Z', status: 'claimed', items: '15kg Rice, 10kg Wheat, 3kg Sugar' },
+      ]);
+      return;
+    }
+
+    try {
+      const { data, error } = await supabase
+        .from('bookings')
+        .select('*')
+        .eq('ration_id', currentUser.ration_id)
+        .eq('status', 'claimed')
+        .order('created_at', { ascending: false })
+        .limit(5);
+
+      if (!error && data) {
+        setRecentClaims(data);
+        if (showNotice) {
+          setSyncStatus('History updated in real-time');
+          setLastUpdated(new Date());
+        }
+      }
+    } catch (e) {
+      console.warn('Error fetching claims history:', e);
+    }
+  }, [currentUser?.ration_id, currentUser?.is_demo]);
+
+  // Realtime subscription to live changes on BOTH 'users' and 'bookings'
+  useEffect(() => {
+    if (!currentUser?.ration_id || currentUser.is_demo) return;
+
+    // 1. Initial claims fetch
+    fetchClaims();
+
+    // 2. Realtime channel listening to:
+    //    - 'users' UPDATE (biometric enrollment / verification from Kiosk/ESP32)
+    //    - 'bookings' INSERT / UPDATE (instant trigger when rations are dispensed)
+    const channel = supabase
+      .channel(`dashboard-live-${currentUser.ration_id}`)
       .on(
         'postgres_changes',
         {
@@ -59,8 +99,6 @@ export default function Dashboard({ user, onUserUpdated, onNavigateToBookings })
         },
         (payload) => {
           console.log('Realtime biometric change detected:', payload.new);
-
-          // Trigger System Notifications when biometrics get verified!
           const oldVerified = Boolean(currentUser?.face_encoding) && Boolean(currentUser?.fingerprint_id);
           const newVerified = Boolean(payload.new?.face_encoding) && Boolean(payload.new?.fingerprint_id);
 
@@ -80,61 +118,72 @@ export default function Dashboard({ user, onUserUpdated, onNavigateToBookings })
 
           setCurrentUser(payload.new);
           onUserUpdated?.(payload.new);
-          setSyncStatus('Live biometric update received from Kiosk!');
+          setSyncStatus('Live biometric update received!');
           setLastUpdated(new Date());
-          setTimeout(() => setSyncStatus('Listening to Realtime stream'), 5000);
+        }
+      )
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'bookings',
+          filter: `ration_id=eq.${currentUser.ration_id}`
+        },
+        (payload) => {
+          console.log('Realtime bookings change detected:', payload);
+          fetchClaims(true);
+
+          if (payload.new && payload.new.status === 'claimed') {
+            const grams = payload.new.target_grams || ((currentUser?.family_members || 1) * 100);
+            const kg = (grams / 1000).toFixed(1).replace(/\.0$/, '');
+            notificationService.sendAlert({
+              type: 'hardware',
+              title: '🎉 Ration Dispensed Successfully!',
+              body: `${kg} kg Subsidized Rice was successfully dispensed at the Kiosk.`
+            });
+            setSyncStatus(`Ration claimed: ${kg} kg! History updated.`);
+            setLastUpdated(new Date());
+          }
         }
       )
       .subscribe();
 
-    return () => {
-      supabase.removeChannel(subscription);
-    };
-  }, [currentUser?.ration_id, currentUser?.face_encoding, currentUser?.fingerprint_id, currentUser?.is_enrolling]);
-
-  // Fetch recent claims history
-  useEffect(() => {
-    async function fetchClaims() {
-      // Only show mock previous claims for dedicated demo evaluation accounts, not new registrations
-      if (currentUser?.is_demo && (currentUser.ration_id === 'RAT-1001' || currentUser.ration_id === 'RAT-9999')) {
-        setRecentClaims([
-          { id: 'CLAIM-701', slot_time: '2026-07-15T10:30:00Z', status: 'claimed', items: '15kg Rice, 10kg Wheat, 2L Kerosene' },
-          { id: 'CLAIM-602', slot_time: '2026-06-12T14:00:00Z', status: 'claimed', items: '15kg Rice, 10kg Wheat, 3kg Sugar' },
-        ]);
-        return;
-      }
-
-      const { data, error } = await supabase
-        .from('bookings')
-        .select('*')
-        .eq('ration_id', currentUser.ration_id)
-        .eq('status', 'claimed')
-        .order('slot_time', { ascending: false })
-        .limit(5);
-
-      if (!error && data) {
-        setRecentClaims(data);
-      }
-    }
-    if (currentUser?.ration_id) {
+    // 3. Auto-poll heartbeat every 3 seconds to guarantee instant refresh on mobile
+    const pollInterval = setInterval(() => {
       fetchClaims();
-    }
-  }, [currentUser?.ration_id]);
+    }, 3000);
 
+    return () => {
+      supabase.removeChannel(channel);
+      clearInterval(pollInterval);
+    };
+  }, [currentUser?.ration_id, currentUser?.is_demo, fetchClaims]);
+
+  // Unified Manual Refresh (Sync Button)
   const handleManualRefresh = async () => {
     if (currentUser?.is_demo) return;
     setLoading(true);
-    const { data, error } = await supabase
-      .from('users')
-      .select('*')
-      .eq('ration_id', currentUser.ration_id)
-      .single();
-    if (!error && data) {
-      setCurrentUser(data);
-      onUserUpdated?.(data);
-      setLastUpdated(new Date());
+    try {
+      const [{ data: userData }] = await Promise.all([
+        supabase
+          .from('users')
+          .select('*')
+          .eq('ration_id', currentUser.ration_id)
+          .single(),
+        fetchClaims(true)
+      ]);
+
+      if (userData) {
+        setCurrentUser(userData);
+        onUserUpdated?.(userData);
+        setLastUpdated(new Date());
+      }
+    } catch (err) {
+      console.warn('Manual refresh error:', err);
+    } finally {
+      setLoading(false);
     }
-    setLoading(false);
   };
 
   const handleTestNotification = async (type) => {
@@ -397,14 +446,31 @@ export default function Dashboard({ user, onUserUpdated, onNavigateToBookings })
                   <div>
                     <div className="font-semibold text-xs text-gray-900">
                       {(() => {
+                        // 1. If explicit target_grams is stored on the claim (e.g. 300g), calculate kg directly
+                        if (claim.target_grams && Number(claim.target_grams) > 0) {
+                          const kg = (Number(claim.target_grams) / 1000).toFixed(1).replace(/\.0$/, '');
+                          return `${kg} kg Subsidized Rice`;
+                        }
+
                         let items = claim.items_claimed || claim.items;
                         if (typeof items === 'string') {
                           try { items = JSON.parse(items); } catch(e) {}
                         }
-                        if (Array.isArray(items)) {
-                          return items.map(item => `${item.quantity} ${item.unit} ${item.item_name}`).join(' • ');
+                        if (Array.isArray(items) && items.length > 0) {
+                          const members = currentUser?.family_members || 1;
+                          return items.map(item => {
+                            let qty = Number(item.quantity) || 0;
+                            // Dynamically scale quota if beneficiary has multiple members but record stored default 0.1
+                            if (members > 1 && qty <= 0.15) {
+                              qty = Number((members * 0.1).toFixed(1));
+                            }
+                            return `${qty} ${item.unit || 'kg'} ${item.item_name || 'Subsidized Rice'}`;
+                          }).join(' • ');
                         }
-                        return t('standardQuota', 'Standard Commodity Quota');
+
+                        // Fallback dynamically based on family members
+                        const dynamicKg = ((currentUser?.family_members || 1) * 0.1).toFixed(1).replace(/\.0$/, '');
+                        return `${dynamicKg} kg Subsidized Rice`;
                       })()}
                     </div>
                     <div className="text-[11px] text-gray-500 mt-0.5">
