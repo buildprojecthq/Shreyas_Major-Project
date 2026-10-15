@@ -64,6 +64,7 @@ void executePhysicalDispense(const char* label, float targetGrams = 100.0);
 void verifyAndDispense();
 void showIdleScreen();
 void showError(String message);
+void deductInventory(float qty);
 
 // Cooldown tracker to prevent duplicate dispensing triggers
 unsigned long lastDispenseTimestamp = 0;
@@ -89,6 +90,7 @@ void handleWebDispense() {
   Serial.print((int)targetGrams);
   Serial.println("g! Opening valve...");
   executePhysicalDispense("Web Auth OK", targetGrams);
+  deductInventory(targetGrams / 1000.0);
 }
 
 void handleTestServo() {
@@ -251,11 +253,18 @@ void deductInventory(float qty) {
       patchHttp.addHeader("Content-Type", "application/json");
       patchHttp.addHeader("Prefer", "return=minimal");
       DynamicJsonDocument pDoc(128);
-      pDoc["quantity_available"] = current - qty;
+      float updatedQty = current - qty;
+      if (updatedQty < 0.0) updatedQty = 0.0;
+      pDoc["quantity_available"] = updatedQty;
       String pBody;
       serializeJson(pDoc, pBody);
       patchHttp.PATCH(pBody);
       patchHttp.end();
+      Serial.print("[INVENTORY] Deducted ");
+      Serial.print(qty, 2);
+      Serial.print(" kg from Subsidized Rice in DB. New balance: ");
+      Serial.print(updatedQty, 2);
+      Serial.println(" kg");
       return;
     }
   }
@@ -598,6 +607,7 @@ void executePhysicalDispense(const char* label, float targetGrams) {
   delay(200);
 
   bool targetReached = false;
+  bool scaleCutoffTriggered = false;
   // Trigger close in advance to account for servo transit time and in-flight grains
   float cutoffWeight = targetGrams - 14.0; 
   if (cutoffWeight < 10.0) cutoffWeight = targetGrams * 0.85;
@@ -642,6 +652,14 @@ void executePhysicalDispense(const char* label, float targetGrams) {
       // Check 1: Target reached threshold
       if (smoothedWeight >= cutoffWeight) {
         dispenser.write(0); // Close gate immediately
+        scaleCutoffTriggered = true;
+        // Instantly latch live LCD counter to targetInt
+        lcd.setCursor(0, 1);
+        lcd.print("Wt: ");
+        lcd.print(targetInt);
+        lcd.print("g / ");
+        lcd.print(targetInt);
+        lcd.print("g    ");
         Serial.print("Target ");
         Serial.print(targetInt);
         Serial.println("g Triggered ✅ - Gate Closed to 0°");
@@ -666,8 +684,8 @@ void executePhysicalDispense(const char* label, float targetGrams) {
   lcd.clear();
   lcd.setCursor(0, 0);
 
-  // Dynamic Clamping Mechanism: If target reached (>= target - 15g), clamp output to clean targetInt
-  if (finalWeight >= (targetGrams - 15.0)) {
+  // Dynamic Clamping Mechanism: If target reached via scale cutoff OR final reading is close
+  if (scaleCutoffTriggered || finalWeight >= (targetGrams - 15.0)) {
     lcd.print("Dispense Done!");
     lcd.setCursor(0, 1);
     lcd.print("Net: ");
@@ -687,7 +705,7 @@ void executePhysicalDispense(const char* label, float targetGrams) {
     Serial.println(" g)");
   }
   
-  delay(2500);
+  delay(3000);
 
   digitalWrite(GREEN_LED, LOW);
   showIdleScreen();
