@@ -135,9 +135,7 @@ export default function RegistrationForm({ onUserLogin, onOpenLanguageSelect }) 
           name: name.trim(),
           phone: phone.trim(),
           family_members: membersCount,
-          face_encoding: null,
-          fingerprint_id: null,
-          is_enrolling: false
+          face_encoding: null
         }])
         .select()
         .single();
@@ -162,8 +160,6 @@ export default function RegistrationForm({ onUserLogin, onOpenLanguageSelect }) 
         name: 'Rahul Kumar',
         phone: '+91 9876543210',
         face_encoding: null,
-        fingerprint_id: null,
-        is_enrolling: false,
         is_demo: true
       });
     } else {
@@ -172,8 +168,6 @@ export default function RegistrationForm({ onUserLogin, onOpenLanguageSelect }) 
         name: 'Anjali Sharma',
         phone: '+91 9123456789',
         face_encoding: Array(128).fill(0.123),
-        fingerprint_id: 'ESP32_FP_7788',
-        is_enrolling: false,
         is_demo: true
       });
     }

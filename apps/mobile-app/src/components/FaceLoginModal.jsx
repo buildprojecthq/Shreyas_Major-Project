@@ -204,8 +204,6 @@ export default function FaceLoginModal({ isOpen, user, onClose, onUserLogin }) {
       name: 'Anjali Sharma (Biometric Demo)',
       phone: '+91 9123456789',
       face_encoding: Array(128).fill(0.123),
-      fingerprint_id: 'ESP32_FP_7788',
-      is_enrolling: false,
       is_demo: true,
     };
     setAuthStatus('⚡ Demo Biometric Match confirmed! Accessing portal...');

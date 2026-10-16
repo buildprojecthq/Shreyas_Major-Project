@@ -131,7 +131,7 @@ export default function App() {
         <div className="max-w-6xl mx-auto px-4 sm:px-8 flex flex-col sm:flex-row items-center justify-between gap-4 text-xs text-gray-500 font-mono">
           <div className="flex items-center gap-2">
             <Cpu className="w-4 h-4 text-blue-600" />
-            <span>ESP32 Fingerprint & Face-API Biometric Sync</span>
+            <span>Face-API Biometric Sync</span>
           </div>
         </div>
       </footer>

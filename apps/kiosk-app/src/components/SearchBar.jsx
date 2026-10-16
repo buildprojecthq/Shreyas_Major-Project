@@ -35,8 +35,6 @@ export default function SearchBar({ onBeneficiaryFound }) {
               name: 'Rahul Kumar',
               phone: '+91 98765 43210',
               face_encoding: null,
-              fingerprint_id: null,
-              is_enrolling: false,
               is_demo: true
             };
             onBeneficiaryFound(demoUser);
@@ -49,8 +47,6 @@ export default function SearchBar({ onBeneficiaryFound }) {
               name: 'Anjali Sharma',
               phone: '+91 91234 56789',
               face_encoding: Array(128).fill(0.245),
-              fingerprint_id: 'ESP32_FP_8899',
-              is_enrolling: false,
               is_demo: true
             };
             onBeneficiaryFound(verifiedDemo);
@@ -81,8 +77,6 @@ export default function SearchBar({ onBeneficiaryFound }) {
         name: 'Rahul Kumar',
         phone: '+91 98765 43210',
         face_encoding: null,
-        fingerprint_id: null,
-        is_enrolling: false,
         is_demo: true
       });
       setError(null);
@@ -93,8 +87,6 @@ export default function SearchBar({ onBeneficiaryFound }) {
         name: 'Anjali Sharma',
         phone: '+91 91234 56789',
         face_encoding: Array(128).fill(0.245),
-        fingerprint_id: 'ESP32_FP_8899',
-        is_enrolling: false,
         is_demo: true
       });
       setError(null);

@@ -1,12 +1,10 @@
 import React, { useState, useEffect } from 'react';
 import { supabase } from '../lib/supabaseClient';
 import {
-  ShieldCheck, AlertTriangle, ScanFace, Fingerprint,
+  ShieldCheck, AlertTriangle, ScanFace,
   User, Phone, Activity, RefreshCw, CheckCircle, Package, ArrowRight, Users, Plus, Minus
 } from 'lucide-react';
 import FaceCaptureModal from './FaceCaptureModal';
-import HardwareTrigger from './HardwareTrigger';
-import DevSimulator from './DevSimulator';
 
 export default function BeneficiaryCard({ user: initialUser, onResetSearch }) {
   const [user, setUser] = useState(initialUser);
@@ -35,9 +33,7 @@ export default function BeneficiaryCard({ user: initialUser, onResetSearch }) {
   };
 
   const hasFace = isValidFaceVector(user?.face_encoding);
-  const hasFingerprint = Boolean(user?.fingerprint_id && String(user.fingerprint_id).trim() !== '');
-  const isBiometricVerified = hasFace || hasFingerprint;
-  const isDualVerified = hasFace && hasFingerprint;
+  const isBiometricVerified = hasFace;
 
   // Fetch monthly quota history
   const fetchQuotaStatus = async () => {
@@ -150,47 +146,6 @@ export default function BeneficiaryCard({ user: initialUser, onResetSearch }) {
     setIsFaceModalOpen(false);
   };
 
-  const handleSimulatedHardwareScan = async (dummyFingerprintId) => {
-    if (user.is_demo) {
-      setUser((prev) => ({ ...prev, fingerprint_id: dummyFingerprintId, is_enrolling: false }));
-      return;
-    }
-
-    const { data, error } = await supabase
-      .from('users')
-      .update({
-        fingerprint_id: dummyFingerprintId,
-        is_enrolling: false,
-        updated_at: new Date().toISOString()
-      })
-      .eq('ration_id', user.ration_id)
-      .select()
-      .single();
-
-    if (!error && data) {
-      setUser(data);
-      setClaimStatus('✅ Fingerprint biometric enrolled!');
-    }
-  };
-
-  const handleToggleEnrolling = async (newState) => {
-    if (user.is_demo) {
-      setUser((prev) => ({ ...prev, is_enrolling: newState }));
-      return;
-    }
-
-    const { data, error } = await supabase
-      .from('users')
-      .update({ is_enrolling: newState, updated_at: new Date().toISOString() })
-      .eq('ration_id', user.ration_id)
-      .select()
-      .single();
-
-    if (!error && data) {
-      setUser(data);
-    }
-  };
-
   const handleIpChange = (e) => {
     const val = e.target.value;
     setEsp32Ip(val);
@@ -199,7 +154,7 @@ export default function BeneficiaryCard({ user: initialUser, onResetSearch }) {
 
   const handleProcessDistribution = async () => {
     if (!isBiometricVerified) {
-      alert('⚠️ Biometrics are pending! Please enroll Face ID or Fingerprint first before dispensing.');
+      alert('⚠️ Biometrics are pending! Please enroll Face ID first before dispensing.');
       return;
     }
 
@@ -344,20 +299,10 @@ export default function BeneficiaryCard({ user: initialUser, onResetSearch }) {
             <span className="text-xs font-bold uppercase tracking-wider text-gray-500 mb-1.5">
               Platform Authentication Status
             </span>
-            {isDualVerified ? (
-              <div className="flex items-center gap-2 px-4 py-2.5 rounded-2xl bg-green-50 border border-green-200 text-green-800 font-extrabold shadow-sm">
-                <ShieldCheck className="w-5 h-5 text-green-600" />
-                <span className="text-sm">DUAL BIOMETRICS VERIFIED</span>
-              </div>
-            ) : hasFace ? (
+            {hasFace ? (
               <div className="flex items-center gap-2 px-4 py-2.5 rounded-2xl bg-green-50 border border-green-200 text-green-800 font-extrabold shadow-sm">
                 <ScanFace className="w-5 h-5 text-green-600" />
                 <span className="text-sm">FACE BIOMETRICS VERIFIED</span>
-              </div>
-            ) : hasFingerprint ? (
-              <div className="flex items-center gap-2 px-4 py-2.5 rounded-2xl bg-green-50 border border-green-200 text-green-800 font-extrabold shadow-sm">
-                <Fingerprint className="w-5 h-5 text-green-600" />
-                <span className="text-sm">FINGERPRINT VERIFIED</span>
               </div>
             ) : (
               <div className="flex items-center gap-2 px-4 py-2.5 rounded-2xl bg-orange-50 border border-orange-200 text-orange-800 font-extrabold shadow-sm animate-pulse">
@@ -369,7 +314,7 @@ export default function BeneficiaryCard({ user: initialUser, onResetSearch }) {
         </div>
 
         {/* Biometrics Action Center */}
-        <div className="mt-8 pt-8 border-t border-gray-100 grid grid-cols-1 lg:grid-cols-2 gap-6">
+        <div className="mt-8 pt-8 border-t border-gray-100">
           {/* Facial Recognition Module */}
           <div className={`p-5 rounded-2xl border transition-all flex flex-col justify-between ${hasFace ? 'bg-green-50/60 border-green-200' : 'bg-gray-50 border-gray-200'
             }`}>
@@ -408,49 +353,6 @@ export default function BeneficiaryCard({ user: initialUser, onResetSearch }) {
               <span>{hasFace ? 'Recapture / Update Face' : 'Activate WebCam & Capture Face'}</span>
             </button>
           </div>
-
-          {/* ESP32 Hardware Fingerprint Module */}
-          <div className={`p-5 rounded-2xl border transition-all flex flex-col justify-between ${hasFingerprint ? 'bg-green-50/60 border-green-200' : 'bg-gray-50 border-gray-200'
-            }`}>
-            <div>
-              <div className="flex items-center justify-between mb-3">
-                <div className="flex items-center gap-2.5">
-                  <Fingerprint className={`w-6 h-6 ${hasFingerprint ? 'text-green-600' : 'text-gray-500'}`} />
-                  <div>
-                    <h3 className="font-bold text-base text-gray-900">Fingerprint Scanner</h3>
-                    <p className="text-xs text-gray-500 font-mono">AS608 / R307 Module</p>
-                  </div>
-                </div>
-                {hasFingerprint ? (
-                  <span className="px-2.5 py-0.5 rounded-full text-xs font-bold bg-green-100 text-green-800 border border-green-200 flex items-center gap-1">
-                    <CheckCircle className="w-3.5 h-3.5" /> ENROLLED
-                  </span>
-                ) : (
-                  <span className="px-2.5 py-0.5 rounded-full text-xs font-bold bg-gray-100 text-gray-600 border border-gray-200 flex items-center gap-1">
-                    OPTIONAL
-                  </span>
-                )}
-              </div>
-              {hasFingerprint && (
-                <div className="mt-3 p-2.5 rounded-xl bg-white border border-green-200 text-[11px] font-mono text-gray-600 flex items-center justify-between">
-                  <span>Hardware Fingerprint ID:</span>
-                  <strong className="text-green-700 font-mono">{user.fingerprint_id}</strong>
-                </div>
-              )}
-            </div>
-
-            <div className="mt-5 space-y-3">
-              <HardwareTrigger
-                isEnrolling={user.is_enrolling}
-                hasFingerprint={hasFingerprint}
-                onToggleEnrolling={handleToggleEnrolling}
-              />
-              <DevSimulator
-                isEnrolling={user.is_enrolling}
-                onSimulateComplete={handleSimulatedHardwareScan}
-              />
-            </div>
-          </div>
         </div>
       </div>
 
@@ -486,7 +388,7 @@ export default function BeneficiaryCard({ user: initialUser, onResetSearch }) {
                 ? `Beneficiary has already claimed their monthly quota on ${new Date(monthlyClaims[0].claimed_at).toLocaleDateString()}. Next allotment next month.`
                 : isBiometricVerified
                   ? `Biometrics verified. Ready for automatic or manual distribution (${targetGrams}g for ${familyMembers} household members).`
-                  : 'Biometrics pending. Please capture Face ID or Fingerprint first to enable dispensing.'}
+                  : 'Biometrics pending. Please capture Face ID first to enable dispensing.'}
             </p>
           </div>
 

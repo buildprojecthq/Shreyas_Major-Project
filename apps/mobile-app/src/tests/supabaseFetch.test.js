@@ -21,14 +21,12 @@ describe('Supabase Database Fetching & Biometric Logic Verification', () => {
     vi.clearAllMocks();
   });
 
-  it('correctly evaluates pending biometrics status when face_encoding or fingerprint_id is missing', async () => {
+  it('correctly evaluates pending biometrics status when face_encoding is missing', async () => {
     const mockPendingUser = {
       ration_id: 'RAT-1001',
       name: 'Rahul Kumar',
       phone: '+91 9876543210',
-      face_encoding: null,
-      fingerprint_id: null,
-      is_enrolling: false
+      face_encoding: null
     };
 
     const selectMock = vi.fn().mockReturnThis();
@@ -48,20 +46,17 @@ describe('Supabase Database Fetching & Biometric Logic Verification', () => {
     
     // Evaluate verification status logic
     const hasFace = Boolean(data.face_encoding);
-    const hasFingerprint = Boolean(data.fingerprint_id);
-    const isVerified = hasFace && hasFingerprint;
+    const isVerified = hasFace;
 
     expect(isVerified).toBe(false);
   });
 
-  it('correctly evaluates verified biometrics status when both face vector and fingerprint ID exist', async () => {
+  it('correctly evaluates verified biometrics status when face vector exists', async () => {
     const mockVerifiedUser = {
       ration_id: 'RAT-9999',
       name: 'Anjali Sharma',
       phone: '+91 9123456789',
-      face_encoding: Array(128).fill(0.123), // standard 128-pt array converted from Float32Array via Array.from()
-      fingerprint_id: 'ESP32_FP_7788',
-      is_enrolling: false
+      face_encoding: Array(128).fill(0.123)
     };
 
     const singleMock = vi.fn().mockResolvedValue({ data: mockVerifiedUser, error: null });
@@ -75,11 +70,9 @@ describe('Supabase Database Fetching & Biometric Logic Verification', () => {
     const { data } = await supabase.from('users').select('*').eq('ration_id', 'RAT-9999').single();
 
     const hasFace = Boolean(data.face_encoding) && Array.isArray(data.face_encoding) && data.face_encoding.length === 128;
-    const hasFingerprint = Boolean(data.fingerprint_id);
-    const isVerified = hasFace && hasFingerprint;
+    const isVerified = hasFace;
 
     expect(isVerified).toBe(true);
-    expect(data.fingerprint_id).toBe('ESP32_FP_7788');
   });
 
   it('executes atomic slot reservation using supabase.rpc("book_slot")', async () => {

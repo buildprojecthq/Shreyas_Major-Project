@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { supabase } from '../lib/supabaseClient';
 import { notificationService } from '../lib/notificationService';
 import {
-  ShieldCheck, AlertTriangle, Fingerprint, ScanFace,
+  ShieldCheck, AlertTriangle, ScanFace,
   RefreshCw, Clock, PackageCheck, ExternalLink, Activity, Info, Bell, Sparkles, Send, Users
 } from 'lucide-react';
 import { useLanguage } from '../context/LanguageContext';
@@ -33,8 +33,7 @@ export default function Dashboard({ user, onUserUpdated, onNavigateToBookings })
 
   // Evaluate biometrics verification status
   const hasFace = isValidFaceVector(currentUser?.face_encoding);
-  const hasFingerprint = Boolean(currentUser?.fingerprint_id && String(currentUser.fingerprint_id).trim() !== '');
-  const isBiometricsVerified = hasFace || hasFingerprint;
+  const isBiometricsVerified = hasFace;
 
   useEffect(() => {
     // Check OS system notification permissions
@@ -99,20 +98,14 @@ export default function Dashboard({ user, onUserUpdated, onNavigateToBookings })
         },
         (payload) => {
           console.log('Realtime biometric change detected:', payload.new);
-          const oldVerified = Boolean(currentUser?.face_encoding) && Boolean(currentUser?.fingerprint_id);
-          const newVerified = Boolean(payload.new?.face_encoding) && Boolean(payload.new?.fingerprint_id);
+          const oldVerified = Boolean(currentUser?.face_encoding);
+          const newVerified = Boolean(payload.new?.face_encoding);
 
           if (!oldVerified && newVerified) {
             notificationService.sendAlert({
               type: 'biometric',
-              title: '✅ Biometric Authentication Complete!',
-              body: 'Your 128-pt facial encoding & ESP32 fingerprint have been verified by Shop Admin. Authorized for commodity claims!'
-            });
-          } else if (!currentUser?.is_enrolling && payload.new?.is_enrolling) {
-            notificationService.sendAlert({
-              type: 'hardware',
-              title: '⚡ ESP32 Biometric Scanner Ready',
-              body: 'Shop admin activated the IoT hardware sensor at the kiosk. Please place your finger on the scanner now.'
+              title: 'Biometric Authentication Complete',
+              body: 'Your facial biometrics have been verified by Shop Admin. Authorized for commodity claims.'
             });
           }
 
@@ -195,8 +188,8 @@ export default function Dashboard({ user, onUserUpdated, onNavigateToBookings })
     if (type === 'biometric') {
       notificationService.sendAlert({
         type: 'biometric',
-        title: '✅ Biometric Authentication Complete!',
-        body: 'Your 128-pt facial encoding & ESP32 hardware fingerprint have just been verified by Shop Admin!'
+        title: 'Biometric Authentication Complete',
+        body: 'Your facial biometrics have just been verified by Shop Admin.'
       });
     } else if (type === 'inventory') {
       notificationService.sendAlert({
@@ -209,12 +202,6 @@ export default function Dashboard({ user, onUserUpdated, onNavigateToBookings })
         type: 'booking',
         title: '🕒 Ration Pickup Slot Confirmed',
         body: 'Your reservation is locked in using Atomic RPC protocol. Please present your Digital Card ID at the kiosk.'
-      });
-    } else if (type === 'hardware') {
-      notificationService.sendAlert({
-        type: 'hardware',
-        title: '⚡ ESP32 Biometric Scanner Awakening',
-        body: 'The Admin Kiosk has initiated hardware enrollment. Please place your finger on the physical scanner now.'
       });
     }
   };
@@ -288,7 +275,7 @@ export default function Dashboard({ user, onUserUpdated, onNavigateToBookings })
         </div>
 
         {/* Biometrics Breakdown Cards */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mt-8 pt-6 border-t border-gray-200 relative z-10">
+        <div className="mt-8 pt-6 border-t border-gray-200 relative z-10">
           <div className={`p-4 rounded-2xl border transition-all ${hasFace ? 'bg-green-50/50 border-green-200' : 'bg-gray-50 border-gray-200'}`}>
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-3">
@@ -309,34 +296,13 @@ export default function Dashboard({ user, onUserUpdated, onNavigateToBookings })
               )}
             </div>
           </div>
-
-          <div className={`p-4 rounded-2xl border transition-all ${hasFingerprint ? 'bg-green-50/50 border-green-200' : 'bg-gray-50 border-gray-200'}`}>
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-3">
-                <div className={`p-2.5 rounded-xl ${hasFingerprint ? 'bg-green-100 text-green-700' : 'bg-gray-200 text-gray-500'}`}>
-                  <Fingerprint className="w-6 h-6" />
-                </div>
-                <div>
-                  <h4 className="font-semibold text-sm text-gray-900">{t('fingerprintHardware', 'ESP32 Hardware Fingerprint')}</h4>
-                  <p className="text-xs font-mono text-gray-500">
-                    {hasFingerprint ? `${t('fingerprintReady', 'Hardware ID')}: ${currentUser.fingerprint_id}` : t('fingerprintMissing', 'Pending ESP32 biometric scanner')}
-                  </p>
-                </div>
-              </div>
-              {hasFingerprint ? (
-                <span className="text-xs px-2.5 py-1 rounded-full bg-green-100 text-green-700 font-bold">{t('readyBadge', 'READY')}</span>
-              ) : (
-                <span className="text-xs px-2.5 py-1 rounded-full bg-gray-200 text-gray-600">{t('missingBadge', 'MISSING')}</span>
-              )}
-            </div>
-          </div>
         </div>
 
         {!isBiometricsVerified && (
           <div className="mt-6 p-4 rounded-2xl bg-orange-50 border border-orange-200 flex items-start sm:items-center justify-between flex-col sm:flex-row gap-3 relative z-10 text-xs text-orange-800">
             <div className="flex items-center gap-2.5">
               <Info className="w-5 h-5 text-orange-600 flex-shrink-0" />
-              <span>{t('biometricNotice', 'Please visit your local Smart Ration Shop Kiosk to quickly record your facial & fingerprint biometrics.')}</span>
+              <span>{t('biometricNotice', 'Please visit your local Smart Ration Shop Kiosk to quickly record your facial biometrics.')}</span>
             </div>
             <span className="font-mono font-bold bg-orange-100 px-3 py-1 rounded-lg text-orange-700 flex-shrink-0">
               {t('liveAutoUpdate', 'Live Auto-Update Enabled')}
@@ -365,7 +331,7 @@ export default function Dashboard({ user, onUserUpdated, onNavigateToBookings })
             </strong>
           </span>
         </div>
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
           <button
             onClick={() => handleTestNotification('biometric')}
             className="p-3 rounded-2xl bg-gray-50 hover:bg-gray-100 border border-gray-200 hover:border-blue-400 transition-all flex flex-col items-center text-center group"
@@ -391,15 +357,6 @@ export default function Dashboard({ user, onUserUpdated, onNavigateToBookings })
             <Clock className="w-6 h-6 text-blue-500 mb-2 group-hover:scale-110 transition-transform" />
             <span className="text-xs font-bold text-gray-900">{t('slotAlertBtn', 'Slot Reserved Confirm')}</span>
             <span className="text-[10px] font-mono text-gray-500 mt-0.5">{t('slotAlertSub', 'Atomic Booking')}</span>
-          </button>
-
-          <button
-            onClick={() => handleTestNotification('hardware')}
-            className="p-3 rounded-2xl bg-gray-50 hover:bg-gray-100 border border-gray-200 hover:border-indigo-400 transition-all flex flex-col items-center text-center group"
-          >
-            <Fingerprint className="w-6 h-6 text-indigo-500 mb-2 group-hover:scale-110 transition-transform" />
-            <span className="text-xs font-bold text-gray-900">{t('hwAlertBtn', 'ESP32 Hardware Trigger')}</span>
-            <span className="text-[10px] font-mono text-gray-500 mt-0.5">{t('hwAlertSub', 'Sensor Signal')}</span>
           </button>
         </div>
       </div>
