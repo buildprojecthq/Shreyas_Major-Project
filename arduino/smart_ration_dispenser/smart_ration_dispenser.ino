@@ -65,6 +65,7 @@ void verifyAndDispense();
 void showIdleScreen();
 void showError(String message);
 void deductInventory(float qty);
+void logRationClaim(String rationId, float grams);
 
 // Cooldown tracker to prevent duplicate dispensing triggers
 unsigned long lastDispenseTimestamp = 0;
@@ -83,6 +84,13 @@ void handleWebDispense() {
   if (targetGrams < 50.0) targetGrams = 100.0;
   if (targetGrams > 1000.0) targetGrams = 1000.0; // Dynamic quota cap (up to 10 family members = 1kg)
 
+  String rId = "111111111111";
+  if (server.hasArg("ration_id")) {
+    rId = server.arg("ration_id");
+  } else if (server.hasArg("id")) {
+    rId = server.arg("id");
+  }
+
   String res = "{\"status\":\"dispensing_started\",\"target_grams\":" + String((int)targetGrams) + "}";
   server.send(200, "application/json", res);
   
@@ -90,6 +98,7 @@ void handleWebDispense() {
   Serial.print((int)targetGrams);
   Serial.println("g! Opening valve...");
   executePhysicalDispense("Web Auth OK", targetGrams);
+  logRationClaim(rId, targetGrams);
   deductInventory(targetGrams / 1000.0);
 }
 
@@ -205,6 +214,9 @@ void setup() {
   lcd.print(WiFi.localIP().toString());
   delay(2000);
 
+  // Sync NTP Time for live database history timestamps
+  configTime(19800, 0, "pool.ntp.org", "time.google.com");
+
   // Start HTTP Server on port 80
   server.on("/dispense", HTTP_GET, handleWebDispense);
   server.on("/dispense", HTTP_POST, handleWebDispense);
@@ -267,6 +279,55 @@ void deductInventory(float qty) {
       Serial.println(" kg");
       return;
     }
+  }
+  http.end();
+}
+
+void logRationClaim(String rationId, float grams) {
+  if (WiFi.status() != WL_CONNECTED) return;
+  WiFiClientSecure client;
+  client.setInsecure();
+  HTTPClient http;
+  http.begin(client, "https://svuzznupaozcjvtederc.supabase.co/rest/v1/bookings");
+  http.setTimeout(4000);
+  http.addHeader("apikey", SUPABASE_ANON_KEY);
+  http.addHeader("Authorization", String("Bearer ") + SUPABASE_ANON_KEY);
+  http.addHeader("Content-Type", "application/json");
+  http.addHeader("Prefer", "return=minimal");
+
+  DynamicJsonDocument doc(512);
+  doc["ration_id"] = rationId;
+  doc["status"] = "claimed";
+  doc["target_grams"] = (int)grams;
+
+  time_t now;
+  time(&now);
+  struct tm timeinfo;
+  char timeBuf[32];
+  if (now > 100000 && gmtime_r(&now, &timeinfo)) {
+    strftime(timeBuf, sizeof(timeBuf), "%Y-%m-%dT%H:%M:%SZ", &timeinfo);
+  } else {
+    snprintf(timeBuf, sizeof(timeBuf), "2026-10-16T12:%02lu:%02luZ", (millis() / 60000) % 60, (millis() / 1000) % 60);
+  }
+  doc["slot_time"] = timeBuf;
+  doc["claimed_at"] = timeBuf;
+
+  float dispensedKg = grams / 1000.0;
+  JsonArray itemsArr = doc.createNestedArray("items_claimed");
+  JsonObject itemObj = itemsArr.createNestedObject();
+  itemObj["item_name"] = "Subsidized Rice";
+  itemObj["quantity"] = dispensedKg;
+  itemObj["unit"] = "kg";
+
+  String body;
+  serializeJson(doc, body);
+
+  int code = http.POST(body);
+  if (code == 200 || code == 201 || code == 204) {
+    Serial.println("[HISTORY] Successfully logged claim to Supabase bookings for " + rationId + " (" + String((int)grams) + "g) ✅");
+  } else {
+    Serial.print("[HISTORY ERROR] Failed to log claim. Code: ");
+    Serial.println(code);
   }
   http.end();
 }
@@ -375,7 +436,17 @@ void checkCloudDispenseQueue() {
       DynamicJsonDocument patchDoc(512);
       patchDoc["status"] = "claimed";
       patchDoc["target_grams"] = cloudTargetGrams;
+      patchDoc["ration_id"] = rationId;
       
+      time_t claimNow;
+      time(&claimNow);
+      struct tm claimTimeinfo;
+      char claimTimeBuf[32];
+      if (claimNow > 100000 && gmtime_r(&claimNow, &claimTimeinfo)) {
+        strftime(claimTimeBuf, sizeof(claimTimeBuf), "%Y-%m-%dT%H:%M:%SZ", &claimTimeinfo);
+        patchDoc["claimed_at"] = claimTimeBuf;
+      }
+
       float dispensedKg = cloudTargetGrams / 1000.0;
       JsonArray itemsArr = patchDoc.createNestedArray("items_claimed");
       JsonObject itemObj = itemsArr.createNestedObject();
@@ -544,6 +615,9 @@ void verifyAndDispense() {
 
   lcd.clear();
   lcd.print("Updating DB...");
+
+  // Log claim to Supabase bookings for real-time history
+  logRationClaim("000000000000", rfidTargetGrams);
 
   // 5. Update Database via HTTP PATCH (Deduct 0.1kg for RFID)
   float newDbQuantity = currentDbQuantity - 0.1;

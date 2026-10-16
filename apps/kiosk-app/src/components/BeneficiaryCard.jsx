@@ -93,26 +93,47 @@ export default function BeneficiaryCard({ user: initialUser, onResetSearch }) {
   const targetGrams = (familyMembers || 1) * 100;
   const targetKg = targetGrams / 1000;
 
-  // Realtime subscription to live updates on this beneficiary
+  // Realtime subscription to live updates on this beneficiary and bookings
   useEffect(() => {
     if (!user || user.is_demo) return;
 
     const channel = supabase
-      .channel(`kiosk-user-${user.ration_id}`)
+      .channel(`kiosk-user-${user.ration_id}-${Date.now()}`)
       .on(
         'postgres_changes',
-        { event: 'UPDATE', schema: 'public', table: 'users', filter: `ration_id=eq.${user.ration_id}` },
+        { event: 'UPDATE', schema: 'public', table: 'users' },
         (payload) => {
-          console.log('Kiosk Realtime Update Received:', payload.new);
-          setUser(payload.new);
-          setSyncIndicator('⚡ Live biometric state updated from Realtime!');
-          setTimeout(() => setSyncIndicator('Listening for Realtime updates'), 4000);
+          if (payload.new?.ration_id === user.ration_id) {
+            console.log('Kiosk Realtime User Update Received:', payload.new);
+            setUser(payload.new);
+            setSyncIndicator('⚡ Live biometric state updated from Realtime!');
+            setTimeout(() => setSyncIndicator('Listening for Realtime updates'), 4000);
+          }
+        }
+      )
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'bookings' },
+        (payload) => {
+          const bRationId = payload.new?.ration_id || payload.old?.ration_id;
+          if (!bRationId || bRationId === user.ration_id) {
+            console.log('Kiosk Realtime Booking Detected:', payload);
+            fetchQuotaStatus();
+            setSyncIndicator('⚡ Quota history updated from Realtime!');
+            setTimeout(() => setSyncIndicator('Listening for Realtime updates'), 4000);
+          }
         }
       )
       .subscribe();
 
+    // Auto-poll heartbeat every 3 seconds
+    const pollTimer = setInterval(() => {
+      fetchQuotaStatus();
+    }, 3000);
+
     return () => {
       supabase.removeChannel(channel);
+      clearInterval(pollTimer);
     };
   }, [user?.ration_id]);
 

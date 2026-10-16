@@ -42,6 +42,11 @@ export default function Dashboard({ user, onUserUpdated, onNavigateToBookings })
     }
   }, []);
 
+  // Keep currentUser in sync when user prop changes
+  useEffect(() => {
+    if (user) setCurrentUser(user);
+  }, [user]);
+
   // Fetch recent claims history
   const fetchClaims = useCallback(async (showNotice = false) => {
     if (!currentUser?.ration_id) return;
@@ -61,14 +66,14 @@ export default function Dashboard({ user, onUserUpdated, onNavigateToBookings })
         .select('*')
         .eq('ration_id', currentUser.ration_id)
         .eq('status', 'claimed')
-        .order('created_at', { ascending: false })
-        .limit(5);
+        .order('claimed_at', { ascending: false })
+        .limit(10);
 
-      if (!error && data) {
-        setRecentClaims(data);
+      if (!error && Array.isArray(data)) {
+        setRecentClaims([...data]);
+        setLastUpdated(new Date());
         if (showNotice) {
           setSyncStatus('History updated in real-time');
-          setLastUpdated(new Date());
         }
       }
     } catch (e) {
@@ -80,39 +85,38 @@ export default function Dashboard({ user, onUserUpdated, onNavigateToBookings })
   useEffect(() => {
     if (!currentUser?.ration_id || currentUser.is_demo) return;
 
-    // 1. Initial claims fetch
+    // Initial claims fetch
     fetchClaims();
 
-    // 2. Realtime channel listening to:
-    //    - 'users' UPDATE (biometric enrollment / verification from Kiosk/ESP32)
-    //    - 'bookings' INSERT / UPDATE (instant trigger when rations are dispensed)
+    // Realtime channel with client-side filtering to catch all Postgres replica identity updates
     const channel = supabase
-      .channel(`dashboard-live-${currentUser.ration_id}`)
+      .channel(`dashboard-live-${currentUser.ration_id}-${Date.now()}`)
       .on(
         'postgres_changes',
         {
           event: 'UPDATE',
           schema: 'public',
-          table: 'users',
-          filter: `ration_id=eq.${currentUser.ration_id}`
+          table: 'users'
         },
         (payload) => {
-          console.log('Realtime biometric change detected:', payload.new);
-          const oldVerified = Boolean(currentUser?.face_encoding);
-          const newVerified = Boolean(payload.new?.face_encoding);
+          if (payload.new?.ration_id === currentUser.ration_id) {
+            console.log('Realtime biometric change detected:', payload.new);
+            const oldVerified = Boolean(currentUser?.face_encoding);
+            const newVerified = Boolean(payload.new?.face_encoding);
 
-          if (!oldVerified && newVerified) {
-            notificationService.sendAlert({
-              type: 'biometric',
-              title: 'Biometric Authentication Complete',
-              body: 'Your facial biometrics have been verified by Shop Admin. Authorized for commodity claims.'
-            });
+            if (!oldVerified && newVerified) {
+              notificationService.sendAlert({
+                type: 'biometric',
+                title: 'Biometric Authentication Complete',
+                body: 'Your facial biometrics have been verified by Shop Admin. Authorized for commodity claims.'
+              });
+            }
+
+            setCurrentUser(payload.new);
+            onUserUpdated?.(payload.new);
+            setSyncStatus('Live biometric update received!');
+            setLastUpdated(new Date());
           }
-
-          setCurrentUser(payload.new);
-          onUserUpdated?.(payload.new);
-          setSyncStatus('Live biometric update received!');
-          setLastUpdated(new Date());
         }
       )
       .on(
@@ -120,32 +124,36 @@ export default function Dashboard({ user, onUserUpdated, onNavigateToBookings })
         {
           event: '*',
           schema: 'public',
-          table: 'bookings',
-          filter: `ration_id=eq.${currentUser.ration_id}`
+          table: 'bookings'
         },
         (payload) => {
-          console.log('Realtime bookings change detected:', payload);
-          fetchClaims(true);
+          const recRationId = payload.new?.ration_id || payload.old?.ration_id;
+          if (!recRationId || recRationId === currentUser.ration_id) {
+            console.log('Realtime bookings change detected:', payload);
+            fetchClaims(true);
 
-          if (payload.new && payload.new.status === 'claimed') {
-            const grams = payload.new.target_grams || ((currentUser?.family_members || 1) * 100);
-            const kg = (grams / 1000).toFixed(1).replace(/\.0$/, '');
-            notificationService.sendAlert({
-              type: 'hardware',
-              title: '🎉 Ration Dispensed Successfully!',
-              body: `${kg} kg Subsidized Rice was successfully dispensed at the Kiosk.`
-            });
-            setSyncStatus(`Ration claimed: ${kg} kg! History updated.`);
-            setLastUpdated(new Date());
+            if (payload.new && payload.new.status === 'claimed') {
+              const grams = payload.new.target_grams || ((currentUser?.family_members || 1) * 100);
+              const kg = (grams / 1000).toFixed(1).replace(/\.0$/, '');
+              notificationService.sendAlert({
+                type: 'hardware',
+                title: '🎉 Ration Dispensed Successfully!',
+                body: `${kg} kg Subsidized Rice was successfully dispensed at the Kiosk.`
+              });
+              setSyncStatus(`Ration claimed: ${kg} kg! History updated.`);
+              setLastUpdated(new Date());
+            }
           }
         }
       )
-      .subscribe();
+      .subscribe((status) => {
+        console.log('Dashboard Realtime status:', status);
+      });
 
-    // 3. Auto-poll heartbeat every 3 seconds to guarantee instant refresh on mobile
+    // Auto-poll heartbeat every 2.5 seconds (ensures real-time updates even if WebSockets sleep)
     const pollInterval = setInterval(() => {
       fetchClaims();
-    }, 3000);
+    }, 2500);
 
     return () => {
       supabase.removeChannel(channel);
